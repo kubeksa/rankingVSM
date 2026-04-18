@@ -656,12 +656,9 @@ Dzięki temu model:
             if override_map:
                 extra_lines = [f"{name} = {pos}" for name, pos in override_map.items()]
                 if combined_manual_text:
-                    combined_manual_text += "
-" + "
-".join(extra_lines)
+                    combined_manual_text += "\n" + "\n".join(extra_lines)
                 else:
-                    combined_manual_text = "
-".join(extra_lines)
+                    combined_manual_text = "\n".join(extra_lines)
 
     if combined_manual_text != manual_positions_text.strip():
         with st.spinner("Przeliczam rankingi po zmianie pozycji..."):
