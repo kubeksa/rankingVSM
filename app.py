@@ -622,37 +622,48 @@ Dzięki temu model:
     if plays_df.empty or stats_df.empty:
         st.error("Nie udało się wczytać żadnych zagrań z plików.")
         return
-
-    st.subheader("Pozycje zawodniczek")
-    st.caption("Tutaj możesz nadpisać pozycję wykrytą z plików VSM. Zmiana zadziała na rankingi poniżej.")
-
-    override_map = {}
-    if not detected_players_df.empty:
-        for _, row in detected_players_df.iterrows():
-            player_name = row["player_name"]
-            team_code = row["team_code"] if pd.notna(row["team_code"]) else ""
-            detected_pos = row["position"] if pd.notna(row["position"]) else ""
-            label = f"{player_name} ({team_code})" if team_code else str(player_name)
-            key = f"pos_override::{label}"
-            options = ["AUTO", "OH", "MB", "OPP", "L", "S"]
-            default_option = detected_pos if detected_pos in options else "AUTO"
-            choice = st.selectbox(
-                label,
-                options=options,
-                index=options.index(default_option if default_option != "" else "AUTO"),
-                key=key,
-            )
-            if choice != "AUTO":
-                override_map[str(player_name)] = choice
-
     combined_manual_text = manual_positions_text.strip()
-    if override_map:
-        extra_lines = [f"{name} = {pos}" for name, pos in override_map.items()]
-        if combined_manual_text:
-            combined_manual_text += "\n" + "\n".join(extra_lines)
-        else:
-            combined_manual_text = "\n".join(extra_lines)
 
+    with st.sidebar:
+        with st.expander("Pozycje zawodniczek", expanded=False):
+            st.caption("Nadpisz pozycję z VSM tylko wtedy, gdy chcesz ją ręcznie zmienić.")
+            override_map = {}
+            if detected_players_df.empty:
+                st.write("Brak wykrytych zawodniczek.")
+            else:
+                for _, row in detected_players_df.iterrows():
+                    player_name = row["player_name"]
+                    team_code = row["team_code"] if pd.notna(row["team_code"]) else ""
+                    detected_pos = row["position"] if pd.notna(row["position"]) else ""
+                    label = f"{player_name} ({team_code})" if team_code else str(player_name)
+
+                    col_left, col_right = st.columns([3, 1])
+                    with col_left:
+                        st.markdown(f"**{label}**")
+                    with col_right:
+                        options = ["AUTO", "OH", "MB", "OPP", "L", "S"]
+                        default_option = detected_pos if detected_pos in options else "AUTO"
+                        choice = st.selectbox(
+                            "Pozycja",
+                            options=options,
+                            index=options.index(default_option if default_option != "" else "AUTO"),
+                            key=f"pos_override::{label}",
+                            label_visibility="collapsed",
+                        )
+                    if choice != "AUTO":
+                        override_map[str(player_name)] = choice
+
+            if override_map:
+                extra_lines = [f"{name} = {pos}" for name, pos in override_map.items()]
+                if combined_manual_text:
+                    combined_manual_text += "
+" + "
+".join(extra_lines)
+                else:
+                    combined_manual_text = "
+".join(extra_lines)
+
+    if combined_manual_text != manual_positions_text.strip():
         with st.spinner("Przeliczam rankingi po zmianie pozycji..."):
             plays_df, stats_df, detected_players_df = process_uploaded_files(file_payloads, combined_manual_text)
 
