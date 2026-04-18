@@ -1,4 +1,4 @@
-# Ranking VSM — Streamlit
+# Ranking VSM — Streamlit z dynamicznymi minimami
 
 ## Uruchom lokalnie
 ```bash

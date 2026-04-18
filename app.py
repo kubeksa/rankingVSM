@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Ranking VSM", page_icon="🏐", layout="wide")
+st.set_page_config(page_title="Ranking VSM by J.Sauer", page_icon="🏐", layout="wide")
 
 POSITION_ALIASES = {
     "przyjmująca": "OH", "przyjmujaca": "OH", "przyjmujący": "OH", "przyjmujacy": "OH",
@@ -23,9 +23,16 @@ POSITION_ALIASES = {
 POSITION_CODE_MAP = {0: "L", 1: "OH", 2: "OPP", 3: "MB", 4: "S"}
 POSITION_LABELS = {"OH": "Przyjmujące", "MB": "Środkowe", "OPP": "Atakujące", "L": "Libero", "S": "Rozgrywające"}
 
+DEFAULT_MINIMUMS = {
+    "OH": {"reception_total": 1, "attack_total": 1},
+    "MB": {"attack_total": 1},
+    "OPP": {"attack_total": 1},
+    "L": {"reception_total": 1},
+    "S": {"set_to_attack_count": 1},
+}
+
 POSITION_PROFILES = {
     "OH": {
-        "minimums": {"reception_total": 1, "attack_total": 1},
         "group_weights": {"receiving": 0.40, "attacking": 0.35, "scoring": 0.10, "balance": 0.15},
         "metric_weights": {
             "receiving": {"reception_positive_pct": 0.60, "reception_perfect_pct": 0.40},
@@ -36,7 +43,6 @@ POSITION_PROFILES = {
         "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "point_balance", "block_points", "serve_aces"],
     },
     "MB": {
-        "minimums": {"attack_total": 1},
         "group_weights": {"attacking": 0.35, "blocking": 0.35, "serve": 0.10, "balance": 0.20},
         "metric_weights": {
             "attacking": {"attack_efficiency_pct": 0.60, "attack_success_pct": 0.40},
@@ -47,7 +53,6 @@ POSITION_PROFILES = {
         "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "block_points", "block_touches", "serve_aces", "point_balance"],
     },
     "OPP": {
-        "minimums": {"attack_total": 1},
         "group_weights": {"attacking": 0.50, "balance": 0.25, "blocking": 0.10, "serve": 0.15},
         "metric_weights": {
             "attacking": {"attack_efficiency_pct": 0.65, "attack_success_pct": 0.35},
@@ -58,7 +63,6 @@ POSITION_PROFILES = {
         "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "point_balance", "block_points", "serve_aces"],
     },
     "L": {
-        "minimums": {"reception_total": 1},
         "group_weights": {"reception": 0.55, "defense": 0.30, "workload": 0.15},
         "metric_weights": {
             "reception": {"reception_positive_pct": 0.60, "reception_perfect_pct": 0.40},
@@ -68,7 +72,6 @@ POSITION_PROFILES = {
         "raw_sort": ["reception_positive_pct", "reception_perfect_pct", "reception_total", "dig_count"],
     },
     "S": {
-        "minimums": {"set_to_attack_count": 1},
         "group_weights": {"attack_after_set": 0.75, "block": 0.15, "serve": 0.10},
         "metric_weights": {
             "attack_after_set": {"attack_after_set_pct": 1.00},
@@ -365,11 +368,11 @@ def apply_minimums(df_pos: pd.DataFrame, minimums: Dict[str, Any]) -> pd.DataFra
             out = out[out[col] >= min_value]
     return out
 
-def build_raw_ranking(stats_df: pd.DataFrame, position: str) -> pd.DataFrame:
+def build_raw_ranking(stats_df: pd.DataFrame, position: str, minimums_config: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
     position = normalize_position(position)
     profile = POSITION_PROFILES[position]
     df = stats_df[stats_df["position"] == position].copy()
-    df = apply_minimums(df, profile["minimums"])
+    df = apply_minimums(df, minimums_config.get(position, {}))
     sort_cols = [c for c in profile["raw_sort"] if c in df.columns]
     if not sort_cols:
         return df
@@ -377,11 +380,11 @@ def build_raw_ranking(stats_df: pd.DataFrame, position: str) -> pd.DataFrame:
     df.insert(0, "rank", range(1, len(df) + 1))
     return df
 
-def build_weighted_ranking(stats_df: pd.DataFrame, position: str) -> pd.DataFrame:
+def build_weighted_ranking(stats_df: pd.DataFrame, position: str, minimums_config: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
     position = normalize_position(position)
     profile = POSITION_PROFILES[position]
     df = stats_df[stats_df["position"] == position].copy()
-    df = apply_minimums(df, profile["minimums"])
+    df = apply_minimums(df, minimums_config.get(position, {}))
     if df.empty:
         return df
     metric_names = set()
@@ -425,11 +428,11 @@ def build_rank_comparison_df(raw_df: pd.DataFrame, weighted_df: pd.DataFrame) ->
         rows.append({"player_name": player, "raw_rank": raw_rank, "weighted_rank": weighted_rank, "delta_rank": weighted_rank - raw_rank})
     return pd.DataFrame(rows)
 
-def build_all_rankings(stats_df: pd.DataFrame) -> Dict[str, Dict[str, pd.DataFrame]]:
+def build_all_rankings(stats_df: pd.DataFrame, minimums_config: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, pd.DataFrame]]:
     result = {}
     for pos in POSITION_PROFILES.keys():
-        raw_full = build_raw_ranking(stats_df, pos)
-        weighted_full = build_weighted_ranking(stats_df, pos)
+        raw_full = build_raw_ranking(stats_df, pos, minimums_config)
+        weighted_full = build_weighted_ranking(stats_df, pos, minimums_config)
         result[pos] = {
             "raw_full": raw_full,
             "weighted_full": weighted_full,
@@ -440,7 +443,7 @@ def build_all_rankings(stats_df: pd.DataFrame) -> Dict[str, Dict[str, pd.DataFra
     return result
 
 @st.cache_data(show_spinner=False)
-def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positions_text: str):
+def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positions_text: str, minimums_config: Dict[str, Dict[str, int]]):
     positions_map: Dict[str, str] = {}
     text = manual_positions_text.strip()
     if text:
@@ -466,7 +469,7 @@ def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positi
             return pd.DataFrame(), pd.DataFrame(), {}
 
         stats_df = compute_player_stats(plays_df, positions_map=positions_map)
-        rankings = build_all_rankings(stats_df)
+        rankings = build_all_rankings(stats_df, minimums_config)
         return plays_df, stats_df, rankings
 
 def build_excel_bytes(stats_df: pd.DataFrame, rankings: Dict[str, Dict[str, pd.DataFrame]]) -> bytes:
@@ -489,21 +492,41 @@ def render_main_table(df: pd.DataFrame):
 
 def main():
     st.title("🏐 Ranking VSM")
-    st.caption("Szybka wersja webowa w Streamlit")
+    st.caption("Wersja webowa z dynamicznymi minimami")
 
     with st.sidebar:
         st.header("Dane wejściowe")
         uploaded_files = st.file_uploader("Wrzuć pliki .vsm", type=["vsm", "json"], accept_multiple_files=True)
         manual_positions_text = st.text_area("Awaryjne ręczne przypisanie pozycji", value="", help="Format: Imię Nazwisko = OH/MB/OPP/L/S", height=120)
 
+        st.header("Minima rankingowe")
+        use_zero = st.toggle("Ustaw wszystkie minima na 0", value=False)
+
+        default = {k: {kk: 0 if use_zero else vv for kk, vv in v.items()} for k, v in DEFAULT_MINIMUMS.items()}
+
+        oh_rec = st.number_input("OH – min przyjęć", min_value=0, value=default["OH"]["reception_total"], step=1)
+        oh_att = st.number_input("OH – min ataków", min_value=0, value=default["OH"]["attack_total"], step=1)
+        mb_att = st.number_input("MB – min ataków", min_value=0, value=default["MB"]["attack_total"], step=1)
+        opp_att = st.number_input("OPP – min ataków", min_value=0, value=default["OPP"]["attack_total"], step=1)
+        l_rec = st.number_input("L – min przyjęć", min_value=0, value=default["L"]["reception_total"], step=1)
+        s_sets = st.number_input("S – min wystaw zakończonych atakiem", min_value=0, value=default["S"]["set_to_attack_count"], step=1)
+
     if not uploaded_files:
         st.info("Najpierw wrzuć co najmniej jeden plik .vsm.")
         return
 
+    minimums_config = {
+        "OH": {"reception_total": int(oh_rec), "attack_total": int(oh_att)},
+        "MB": {"attack_total": int(mb_att)},
+        "OPP": {"attack_total": int(opp_att)},
+        "L": {"reception_total": int(l_rec)},
+        "S": {"set_to_attack_count": int(s_sets)},
+    }
+
     file_payloads = [(f.name, f.getvalue()) for f in uploaded_files]
 
     with st.spinner("Liczę rankingi..."):
-        plays_df, stats_df, rankings = process_uploaded_files(file_payloads, manual_positions_text)
+        plays_df, stats_df, rankings = process_uploaded_files(file_payloads, manual_positions_text, minimums_config)
 
     if plays_df.empty or stats_df.empty or not rankings:
         st.error("Nie udało się wczytać żadnych zagrań z plików.")
@@ -529,7 +552,7 @@ def main():
         pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="raw_pos")
         raw_df = rankings[pos]["raw"].copy()
         if raw_df.empty:
-            st.warning("Brak danych dla tej pozycji.")
+            st.warning("Brak danych dla tej pozycji przy obecnych minimach.")
         else:
             render_main_table(raw_df)
             metric_candidates = [c for c in raw_df.columns if c != "rank" and pd.api.types.is_numeric_dtype(raw_df[c])]
@@ -551,7 +574,7 @@ def main():
         pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="weighted_pos")
         weighted_df = rankings[pos]["weighted"].copy()
         if weighted_df.empty:
-            st.warning("Brak danych dla tej pozycji.")
+            st.warning("Brak danych dla tej pozycji przy obecnych minimach.")
         else:
             render_main_table(weighted_df)
             top_n = st.slider("Liczba zawodniczek", 5, min(20, len(weighted_df)), min(10, len(weighted_df)), key="weighted_topn")
@@ -567,7 +590,7 @@ def main():
         pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="analysis_pos")
         compare_df = rankings[pos]["compare"].copy()
         if compare_df.empty:
-            st.warning("Brak danych dla tej pozycji.")
+            st.warning("Brak danych dla tej pozycji przy obecnych minimach.")
         else:
             st.caption("Tabela pokazuje ranking RAW obok WEIGHTED oraz zmianę miejsca względem RAW.")
             table_df = compare_df[["player_name", "raw_rank", "weighted_rank", "delta_rank"]].copy()
