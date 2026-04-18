@@ -196,6 +196,23 @@ def make_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def rename_display_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: pretty_label(c) for c in df.columns})
 
+
+def extract_detected_players(plays_df: pd.DataFrame) -> pd.DataFrame:
+    if plays_df.empty:
+        return pd.DataFrame(columns=["player_name", "team_code", "position"])
+    tmp = plays_df.copy()
+    tmp = tmp[tmp["player_name"].notna()].copy()
+    if tmp.empty:
+        return pd.DataFrame(columns=["player_name", "team_code", "position"])
+    grouped = (
+        tmp.groupby(["player_name", "team_code"], dropna=False)["position"]
+        .agg(lambda s: s.dropna().mode().iloc[0] if not s.dropna().empty else None)
+        .reset_index()
+        .sort_values(["team_code", "player_name"], na_position="last")
+        .reset_index(drop=True)
+    )
+    return grouped
+
 def parse_manual_positions(manual_positions_text: str) -> Dict[str, str]:
     positions_map: Dict[str, str] = {}
     text = manual_positions_text.strip()
@@ -505,10 +522,11 @@ def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positi
             tmp_paths.append(path)
         plays_df = load_many_vsm_files(tmp_paths, positions_map=positions_map)
         if plays_df.empty:
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         stats_df = compute_player_stats(plays_df, positions_map=positions_map)
         stats_df = add_team_context(stats_df)
-        return plays_df, stats_df
+        detected_players_df = extract_detected_players(plays_df)
+        return plays_df, stats_df, detected_players_df
 
 @st.cache_data(show_spinner=False)
 def compute_rankings_cached(stats_df: pd.DataFrame, minimums_config: Dict[str, Dict[str, int]]):
@@ -535,14 +553,14 @@ def render_main_table(df: pd.DataFrame):
     st.dataframe(rename_display_columns(make_display_dataframe(df)), width="stretch", hide_index=True)
 
 def main():
-    st.title("🏐 Ranking VSM — PVI")
+    st.title("🏐 Ranking VSM by JSauer")
     st.caption("PVI = prawdziwy z-score + usage rate + wagi pozycyjne")
 
     with st.sidebar:
         st.header("Dane wejściowe")
         uploaded_files = st.file_uploader("Wrzuć pliki .vsm", type=["vsm", "json"], accept_multiple_files=True)
-        manual_positions_text = st.text_area("Awaryjne ręczne przypisanie pozycji", value="", help="Format: Imię Nazwisko = OH/MB/OPP/L/S", height=120)
-        st.caption("Jeśli wpiszesz pozycję tutaj, nadpisze ona pozycję zaciągniętą z pliku VSM.")
+        manual_positions_text = st.text_area("Awaryjne ręczne przypisanie pozycji", value="", help="Format: Imię Nazwisko = OH/MB/OPP/L/S", height=80)
+        st.caption("Możesz też użyć listy rozwijanej zawodniczek poniżej po wczytaniu plików.")
 
         st.header("Minima rankingowe")
         use_zero = st.toggle("Ustaw wszystkie minima na 0", value=False)
@@ -599,11 +617,48 @@ Dzięki temu model:
     file_payloads = [(f.name, f.getvalue()) for f in uploaded_files]
 
     with st.spinner("Wczytuję pliki i liczę statystyki..."):
-        plays_df, stats_df = process_uploaded_files(file_payloads, manual_positions_text)
-        rankings = compute_rankings_cached(stats_df, minimums_config)
+        plays_df, stats_df, detected_players_df = process_uploaded_files(file_payloads, manual_positions_text)
 
-    if plays_df.empty or stats_df.empty or not rankings:
+    if plays_df.empty or stats_df.empty:
         st.error("Nie udało się wczytać żadnych zagrań z plików.")
+        return
+
+    st.subheader("Pozycje zawodniczek")
+    st.caption("Tutaj możesz nadpisać pozycję wykrytą z plików VSM. Zmiana zadziała na rankingi poniżej.")
+
+    override_map = {}
+    if not detected_players_df.empty:
+        for _, row in detected_players_df.iterrows():
+            player_name = row["player_name"]
+            team_code = row["team_code"] if pd.notna(row["team_code"]) else ""
+            detected_pos = row["position"] if pd.notna(row["position"]) else ""
+            label = f"{player_name} ({team_code})" if team_code else str(player_name)
+            key = f"pos_override::{label}"
+            options = ["AUTO", "OH", "MB", "OPP", "L", "S"]
+            default_option = detected_pos if detected_pos in options else "AUTO"
+            choice = st.selectbox(
+                label,
+                options=options,
+                index=options.index(default_option if default_option != "" else "AUTO"),
+                key=key,
+            )
+            if choice != "AUTO":
+                override_map[str(player_name)] = choice
+
+    combined_manual_text = manual_positions_text.strip()
+    if override_map:
+        extra_lines = [f"{name} = {pos}" for name, pos in override_map.items()]
+        if combined_manual_text:
+            combined_manual_text += "\n" + "\n".join(extra_lines)
+        else:
+            combined_manual_text = "\n".join(extra_lines)
+
+        with st.spinner("Przeliczam rankingi po zmianie pozycji..."):
+            plays_df, stats_df, detected_players_df = process_uploaded_files(file_payloads, combined_manual_text)
+
+    rankings = compute_rankings_cached(stats_df, minimums_config)
+    if not rankings:
+        st.error("Nie udało się policzyć rankingów.")
         return
 
     c1, c2, c3, c4 = st.columns(4)
