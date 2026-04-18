@@ -87,18 +87,18 @@ PVI_METRIC_WEIGHTS = {
 }
 
 OUTPUT_COLUMNS_RAW = {
-    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "serve_aces", "point_balance"],
+    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "reception_error_count", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "serve_aces", "point_balance"],
     "MB": ["rank", "player_name", "team_code", "matches", "sets_played", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "block_touches", "serve_aces", "point_balance"],
     "OPP": ["rank", "player_name", "team_code", "matches", "sets_played", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "serve_aces", "point_balance"],
-    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "reception_total", "dig_count"],
+    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "reception_error_count", "reception_total", "dig_count"],
     "S": ["rank", "player_name", "team_code", "matches", "sets_played", "set_to_attack_count", "set_to_kill_count", "attack_after_set_pct", "block_points", "serve_aces"],
 }
 
 OUTPUT_COLUMNS_PVI = {
-    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "point_balance_per_set"],
+    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "reception_error_count", "point_balance_per_set"],
     "MB": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "block_points_per_set", "block_touches_per_set", "point_balance_per_set"],
     "OPP": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "point_balance_per_set", "serve_aces_per_set"],
-    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "reception_usage_rate", "reception_positive_pct", "reception_perfect_pct", "dig_count_per_set"],
+    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "reception_usage_rate", "reception_positive_pct", "reception_perfect_pct", "reception_error_count", "dig_count_per_set"],
     "S": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "set_usage_rate", "attack_after_set_pct", "set_to_kill_count_per_set", "block_points_per_set", "serve_aces_per_set"],
 }
 
@@ -106,6 +106,7 @@ DISPLAY_COLUMN_NAMES = {
     "rank": "Miejsce", "player_name": "Zawodniczka", "team_code": "Drużyna", "matches": "Mecze", "sets_played": "Sety",
     "reception_positive_count": "Przyjęcie + (liczba)", "reception_positive_pct": "Przyjęcie + (%)",
     "reception_perfect_count": "Przyjęcie # (liczba)", "reception_perfect_pct": "Przyjęcie # (%)",
+    "reception_error_count": "Błędy przyjęcia",
     "attack_kills": "A#", "attack_success_pct": "Skuteczność ataku (%)",
     "attack_efficiency_count": "Efektywność ataku (liczba)", "attack_efficiency_pct": "Efektywność ataku (%)",
     "block_points": "B#", "block_touches": "B+", "serve_aces": "S#", "point_balance": "Bilans punktowy",
@@ -293,7 +294,7 @@ def parse_vsm_to_dataframe(path: str | Path, positions_map: Optional[Dict[str, s
                     player_name = first_not_none(player_name, meta.get("player_name"))
                     team_code = first_not_none(team_code, meta.get("team_code"))
                     inferred_position = meta.get("position")
-                position = first_not_none(normalize_position(play.get("position")), inferred_position, positions_map.get(player_name) if player_name else None)
+                position = first_not_none(positions_map.get(player_name) if player_name else None, normalize_position(play.get("position")), inferred_position)
                 rows.append({
                     "match_id": match_id, "set_number": set_number, "exchange_id": event_idx, "play_index": play_idx,
                     "team_code": str(team_code) if team_code is not None else None, "player_name": player_name,
@@ -322,6 +323,7 @@ def compute_common_metrics(df_player: pd.DataFrame) -> dict:
     attack_errors = count_eval(df_player, "A=")
     reception_positive_count = count_eval(df_player, "R#") + count_eval(df_player, "R+")
     reception_perfect_count = count_eval(df_player, "R#")
+    reception_error_count = count_eval(df_player, "R=")
     block_points = count_eval(df_player, "B#")
     block_touches = count_eval(df_player, "B+")
     serve_aces = count_eval(df_player, "S#")
@@ -340,6 +342,7 @@ def compute_common_metrics(df_player: pd.DataFrame) -> dict:
         "reception_positive_pct": safe_div(reception_positive_count, all_receptions),
         "reception_perfect_count": reception_perfect_count,
         "reception_perfect_pct": safe_div(reception_perfect_count, all_receptions),
+        "reception_error_count": reception_error_count,
         "set_total": all_sets, "block_points": block_points, "block_touches": block_touches, "serve_aces": serve_aces,
         "dig_count": dig_count, "points_total": points, "errors_total": errors, "point_balance": point_balance,
         "block_points_per_set": safe_div(block_points, sets_played), "block_touches_per_set": safe_div(block_touches, sets_played),
@@ -532,13 +535,14 @@ def render_main_table(df: pd.DataFrame):
     st.dataframe(rename_display_columns(make_display_dataframe(df)), width="stretch", hide_index=True)
 
 def main():
-    st.title("🏐 Ranking VSM by JSauer")
+    st.title("🏐 Ranking VSM — PVI")
     st.caption("PVI = prawdziwy z-score + usage rate + wagi pozycyjne")
 
     with st.sidebar:
         st.header("Dane wejściowe")
         uploaded_files = st.file_uploader("Wrzuć pliki .vsm", type=["vsm", "json"], accept_multiple_files=True)
         manual_positions_text = st.text_area("Awaryjne ręczne przypisanie pozycji", value="", help="Format: Imię Nazwisko = OH/MB/OPP/L/S", height=120)
+        st.caption("Jeśli wpiszesz pozycję tutaj, nadpisze ona pozycję zaciągniętą z pliku VSM.")
 
         st.header("Minima rankingowe")
         use_zero = st.toggle("Ustaw wszystkie minima na 0", value=False)
@@ -551,7 +555,8 @@ def main():
         l_rec = st.number_input("L – min przyjęć", min_value=0, value=default["L"]["reception_total"], step=1)
         s_sets = st.number_input("S – min wystaw zakończonych atakiem", min_value=0, value=default["S"]["set_to_attack_count"], step=1)
 
-    st.info("""
+    with st.expander("ℹ️ Jak liczony jest PVI", expanded=False):
+        st.markdown("""
 ### Jak liczony jest PVI
 **PVI (Player Value Index)** w tej aplikacji jest liczony w 3 krokach:
 
@@ -577,6 +582,7 @@ Dzięki temu model:
 - premiuje efektywność przy dużym obciążeniu,
 - nie opiera się tylko na surowych liczbach.
 """)
+
 
     if not uploaded_files:
         st.info("Najpierw wrzuć co najmniej jeden plik .vsm.")
