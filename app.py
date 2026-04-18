@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Ranking VSM", page_icon="🏐", layout="wide")
+st.set_page_config(page_title="Ranking VSM — PVI", page_icon="🏐", layout="wide")
 
 POSITION_ALIASES = {
     "przyjmująca": "OH", "przyjmujaca": "OH", "przyjmujący": "OH", "przyjmujacy": "OH",
@@ -31,63 +31,75 @@ DEFAULT_MINIMUMS = {
     "S": {"set_to_attack_count": 1},
 }
 
-POSITION_PROFILES = {
+RAW_SORTS = {
+    "OH": ["attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "point_balance", "block_points", "serve_aces"],
+    "MB": ["attack_efficiency_pct", "attack_success_pct", "block_points", "block_touches", "serve_aces", "point_balance"],
+    "OPP": ["attack_efficiency_pct", "attack_success_pct", "point_balance", "block_points", "serve_aces"],
+    "L": ["reception_positive_pct", "reception_perfect_pct", "reception_total", "dig_count"],
+    "S": ["attack_after_set_pct", "set_to_kill_count", "block_points", "serve_aces"],
+}
+
+PVI_METRIC_WEIGHTS = {
     "OH": {
-        "group_weights": {"receiving": 0.40, "attacking": 0.35, "scoring": 0.10, "balance": 0.15},
-        "metric_weights": {
-            "receiving": {"reception_positive_pct": 0.60, "reception_perfect_pct": 0.40},
-            "attacking": {"attack_efficiency_pct": 0.60, "attack_success_pct": 0.40},
-            "scoring": {"block_points_per_set": 0.50, "serve_aces_per_set": 0.50},
-            "balance": {"point_balance_per_set": 1.00},
-        },
-        "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "point_balance", "block_points", "serve_aces"],
+        "z_reception_positive_pct": 0.18,
+        "z_reception_perfect_pct": 0.12,
+        "z_attack_efficiency_pct": 0.18,
+        "z_attack_success_pct": 0.10,
+        "z_scoring_efficiency": 0.12,
+        "z_attack_usage_rate": 0.08,
+        "z_point_balance_per_set": 0.12,
+        "z_block_points_per_set": 0.05,
+        "z_serve_aces_per_set": 0.05,
     },
     "MB": {
-        "group_weights": {"attacking": 0.35, "blocking": 0.35, "serve": 0.10, "balance": 0.20},
-        "metric_weights": {
-            "attacking": {"attack_efficiency_pct": 0.60, "attack_success_pct": 0.40},
-            "blocking": {"block_points_per_set": 0.65, "block_touches_per_set": 0.35},
-            "serve": {"serve_aces_per_set": 1.00},
-            "balance": {"point_balance_per_set": 1.00},
-        },
-        "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "block_points", "block_touches", "serve_aces", "point_balance"],
+        "z_attack_efficiency_pct": 0.18,
+        "z_attack_success_pct": 0.12,
+        "z_scoring_efficiency": 0.12,
+        "z_attack_usage_rate": 0.06,
+        "z_block_points_per_set": 0.20,
+        "z_block_touches_per_set": 0.12,
+        "z_serve_aces_per_set": 0.05,
+        "z_point_balance_per_set": 0.15,
     },
     "OPP": {
-        "group_weights": {"attacking": 0.50, "balance": 0.25, "blocking": 0.10, "serve": 0.15},
-        "metric_weights": {
-            "attacking": {"attack_efficiency_pct": 0.65, "attack_success_pct": 0.35},
-            "balance": {"point_balance_per_set": 1.00},
-            "blocking": {"block_points_per_set": 1.00},
-            "serve": {"serve_aces_per_set": 1.00},
-        },
-        "raw_sort": ["attack_efficiency_pct", "attack_success_pct", "point_balance", "block_points", "serve_aces"],
+        "z_attack_efficiency_pct": 0.22,
+        "z_attack_success_pct": 0.14,
+        "z_scoring_efficiency": 0.16,
+        "z_attack_usage_rate": 0.10,
+        "z_point_balance_per_set": 0.18,
+        "z_block_points_per_set": 0.08,
+        "z_serve_aces_per_set": 0.12,
     },
     "L": {
-        "group_weights": {"reception": 0.55, "defense": 0.30, "workload": 0.15},
-        "metric_weights": {
-            "reception": {"reception_positive_pct": 0.60, "reception_perfect_pct": 0.40},
-            "defense": {"dig_count_per_set": 1.00},
-            "workload": {"reception_total_per_set": 1.00},
-        },
-        "raw_sort": ["reception_positive_pct", "reception_perfect_pct", "reception_total", "dig_count"],
+        "z_reception_positive_pct": 0.28,
+        "z_reception_perfect_pct": 0.22,
+        "z_dig_count_per_set": 0.25,
+        "z_reception_usage_rate": 0.15,
+        "z_point_balance_per_set": 0.10,
     },
     "S": {
-        "group_weights": {"attack_after_set": 0.75, "block": 0.15, "serve": 0.10},
-        "metric_weights": {
-            "attack_after_set": {"attack_after_set_pct": 1.00},
-            "block": {"block_points_per_set": 1.00},
-            "serve": {"serve_aces_per_set": 1.00},
-        },
-        "raw_sort": ["attack_after_set_pct", "set_to_kill_count", "block_points", "serve_aces"],
+        "z_attack_after_set_pct": 0.42,
+        "z_set_usage_rate": 0.22,
+        "z_set_to_kill_count_per_set": 0.16,
+        "z_block_points_per_set": 0.10,
+        "z_serve_aces_per_set": 0.10,
     },
 }
 
-OUTPUT_COLUMNS = {
-    "OH": ["rank","player_name","team_code","matches","sets_played","reception_positive_count","reception_positive_pct","reception_perfect_count","reception_perfect_pct","attack_kills","attack_success_pct","attack_efficiency_count","attack_efficiency_pct","block_points","serve_aces","point_balance","ranking_score"],
-    "MB": ["rank","player_name","team_code","matches","sets_played","attack_kills","attack_success_pct","attack_efficiency_count","attack_efficiency_pct","block_points","block_touches","serve_aces","point_balance","ranking_score"],
-    "OPP": ["rank","player_name","team_code","matches","sets_played","attack_kills","attack_success_pct","attack_efficiency_count","attack_efficiency_pct","block_points","serve_aces","point_balance","ranking_score"],
-    "L": ["rank","player_name","team_code","matches","sets_played","reception_positive_count","reception_positive_pct","reception_perfect_count","reception_perfect_pct","reception_total","dig_count","ranking_score"],
-    "S": ["rank","player_name","team_code","matches","sets_played","set_to_attack_count","set_to_kill_count","attack_after_set_pct","block_points","serve_aces","ranking_score"],
+OUTPUT_COLUMNS_RAW = {
+    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "serve_aces", "point_balance"],
+    "MB": ["rank", "player_name", "team_code", "matches", "sets_played", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "block_touches", "serve_aces", "point_balance"],
+    "OPP": ["rank", "player_name", "team_code", "matches", "sets_played", "attack_kills", "attack_success_pct", "attack_efficiency_count", "attack_efficiency_pct", "block_points", "serve_aces", "point_balance"],
+    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "reception_positive_count", "reception_positive_pct", "reception_perfect_count", "reception_perfect_pct", "reception_total", "dig_count"],
+    "S": ["rank", "player_name", "team_code", "matches", "sets_played", "set_to_attack_count", "set_to_kill_count", "attack_after_set_pct", "block_points", "serve_aces"],
+}
+
+OUTPUT_COLUMNS_PVI = {
+    "OH": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "reception_positive_pct", "reception_perfect_pct", "point_balance_per_set"],
+    "MB": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "block_points_per_set", "block_touches_per_set", "point_balance_per_set"],
+    "OPP": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "attack_usage_rate", "scoring_efficiency", "attack_efficiency_pct", "attack_success_pct", "point_balance_per_set", "serve_aces_per_set"],
+    "L": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "reception_usage_rate", "reception_positive_pct", "reception_perfect_pct", "dig_count_per_set"],
+    "S": ["rank", "player_name", "team_code", "matches", "sets_played", "pvi_score", "set_usage_rate", "attack_after_set_pct", "set_to_kill_count_per_set", "block_points_per_set", "serve_aces_per_set"],
 }
 
 DISPLAY_COLUMN_NAMES = {
@@ -97,10 +109,13 @@ DISPLAY_COLUMN_NAMES = {
     "attack_kills": "A#", "attack_success_pct": "Skuteczność ataku (%)",
     "attack_efficiency_count": "Efektywność ataku (liczba)", "attack_efficiency_pct": "Efektywność ataku (%)",
     "block_points": "B#", "block_touches": "B+", "serve_aces": "S#", "point_balance": "Bilans punktowy",
-    "ranking_score": "Weighted score", "reception_total": "Liczba przyjęć", "dig_count": "D#",
-    "set_to_attack_count": "Ataki po wystawie", "set_to_kill_count": "A# po wystawie",
-    "attack_after_set_pct": "Skuteczność po wystawie (%)", "raw_rank": "RAW", "weighted_rank": "WEIGHTED",
-    "delta_rank": "Zmiana vs RAW",
+    "reception_total": "Liczba przyjęć", "dig_count": "D#", "set_to_attack_count": "Ataki po wystawie",
+    "set_to_kill_count": "A# po wystawie", "attack_after_set_pct": "Skuteczność po wystawie (%)",
+    "raw_rank": "RAW", "pvi_rank": "PVI", "delta_rank": "Zmiana vs RAW", "pvi_score": "PVI score",
+    "attack_usage_rate": "Usage ataku", "reception_usage_rate": "Usage przyjęcia", "set_usage_rate": "Usage wystaw",
+    "scoring_efficiency": "Scoring Efficiency", "point_balance_per_set": "Bilans / set",
+    "block_points_per_set": "B# / set", "block_touches_per_set": "B+ / set", "serve_aces_per_set": "S# / set",
+    "dig_count_per_set": "D# / set", "set_to_kill_count_per_set": "A# po wystawie / set",
 }
 
 def safe_div(n: float, d: float) -> float:
@@ -129,13 +144,20 @@ def get_nested(d: Any, *path, default=None):
             return default
     return cur
 
-def percent_rank(series: pd.Series) -> pd.Series:
-    series = series.astype(float)
-    if series.empty:
-        return series
-    if series.nunique(dropna=False) <= 1:
-        return pd.Series([50.0] * len(series), index=series.index)
-    return (series.rank(method="average", pct=True) * 100.0).round(4)
+def zscore(series: pd.Series) -> pd.Series:
+    s = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
+    std = s.std(ddof=0)
+    if len(s) == 0 or std == 0:
+        return pd.Series([0.0] * len(s), index=s.index)
+    return (s - s.mean()) / std
+
+def minmax_0_100(series: pd.Series) -> pd.Series:
+    s = pd.to_numeric(series, errors="coerce").fillna(0.0).astype(float)
+    mn = s.min()
+    mx = s.max()
+    if len(s) == 0 or mx == mn:
+        return pd.Series([50.0] * len(s), index=s.index)
+    return ((s - mn) / (mx - mn) * 100.0).round(4)
 
 def count_eval(df: pd.DataFrame, code: str) -> int:
     return int((df["evaluation_code"] == code).sum())
@@ -162,16 +184,31 @@ def pretty_label(col: str) -> str:
 def make_display_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     for col in out.columns:
-        if col.endswith("_pct"):
-            out[col] = (out[col].fillna(0) * 100).round(2)
-        elif col == "ranking_score":
-            out[col] = out[col].fillna(0).round(2)
+        if col.endswith("_pct") or col.endswith("_rate"):
+            out[col] = (pd.to_numeric(out[col], errors="coerce").fillna(0) * 100).round(2)
+        elif col in ("pvi_score",):
+            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0).round(2)
         elif pd.api.types.is_float_dtype(out[col]):
             out[col] = out[col].fillna(0).round(2)
     return out
 
 def rename_display_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df.rename(columns={c: pretty_label(c) for c in df.columns})
+
+def parse_manual_positions(manual_positions_text: str) -> Dict[str, str]:
+    positions_map: Dict[str, str] = {}
+    text = manual_positions_text.strip()
+    if text:
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line or "=" not in line:
+                continue
+            name, pos = line.split("=", 1)
+            name = name.strip()
+            pos = normalize_position(pos.strip())
+            if name and pos in POSITION_LABELS:
+                positions_map[name] = pos
+    return positions_map
 
 def extract_team_and_player_metadata(vsm: dict) -> Tuple[Dict[Tuple[str, Any], dict], Dict[str, str]]:
     player_lookup: Dict[Tuple[str, Any], dict] = {}
@@ -359,7 +396,26 @@ def compute_player_stats(df: pd.DataFrame, positions_map: Optional[Dict[str, str
     stats = pd.DataFrame(rows)
     if not stats.empty:
         stats["position"] = stats["position"].apply(normalize_position)
+        stats["set_to_kill_count_per_set"] = stats.apply(lambda r: safe_div(r["set_to_kill_count"], r["sets_played"]), axis=1)
     return stats
+
+def add_team_context(stats_df: pd.DataFrame) -> pd.DataFrame:
+    if stats_df.empty:
+        return stats_df
+    team = stats_df.groupby("team_code", dropna=False).agg(
+        team_attack_total=("attack_total", "sum"),
+        team_reception_total=("reception_total", "sum"),
+        team_set_total=("set_total", "sum"),
+        team_points_total=("points_total", "sum"),
+        team_attack_kills=("attack_kills", "sum"),
+    ).reset_index()
+    out = stats_df.merge(team, on="team_code", how="left")
+    out["attack_usage_rate"] = out.apply(lambda r: safe_div(r["attack_total"], r["team_attack_total"]), axis=1)
+    out["reception_usage_rate"] = out.apply(lambda r: safe_div(r["reception_total"], r["team_reception_total"]), axis=1)
+    out["set_usage_rate"] = out.apply(lambda r: safe_div(r["set_total"], r["team_set_total"]), axis=1)
+    out["point_share"] = out.apply(lambda r: safe_div(r["points_total"], r["team_points_total"]), axis=1)
+    out["scoring_efficiency"] = out.apply(lambda r: safe_div(r["point_share"], r["attack_usage_rate"]) if r["attack_usage_rate"] > 0 else 0.0, axis=1)
+    return out
 
 def apply_minimums(df_pos: pd.DataFrame, minimums: Dict[str, Any]) -> pd.DataFrame:
     out = df_pos.copy()
@@ -370,45 +426,38 @@ def apply_minimums(df_pos: pd.DataFrame, minimums: Dict[str, Any]) -> pd.DataFra
 
 def build_raw_ranking(stats_df: pd.DataFrame, position: str, minimums_config: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
     position = normalize_position(position)
-    profile = POSITION_PROFILES[position]
     df = stats_df[stats_df["position"] == position].copy()
     df = apply_minimums(df, minimums_config.get(position, {}))
-    sort_cols = [c for c in profile["raw_sort"] if c in df.columns]
+    sort_cols = [c for c in RAW_SORTS[position] if c in df.columns]
     if not sort_cols:
         return df
     df = df.sort_values(by=sort_cols, ascending=[False] * len(sort_cols)).reset_index(drop=True)
     df.insert(0, "rank", range(1, len(df) + 1))
     return df
 
-def build_weighted_ranking(stats_df: pd.DataFrame, position: str, minimums_config: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
+def build_pvi_ranking(stats_df: pd.DataFrame, position: str, minimums_config: Dict[str, Dict[str, Any]]) -> pd.DataFrame:
     position = normalize_position(position)
-    profile = POSITION_PROFILES[position]
     df = stats_df[stats_df["position"] == position].copy()
     df = apply_minimums(df, minimums_config.get(position, {}))
     if df.empty:
         return df
-    metric_names = set()
-    for _, metrics in profile["metric_weights"].items():
-        metric_names.update(metrics.keys())
-    for metric in metric_names:
-        if metric not in df.columns:
-            df[metric] = 0.0
-        df[f"{metric}_score"] = percent_rank(df[metric].fillna(0.0))
-    for group_name, metrics in profile["metric_weights"].items():
-        group_score = pd.Series([0.0] * len(df), index=df.index)
-        for metric, weight in metrics.items():
-            group_score += df[f"{metric}_score"] * weight
-        df[f"{group_name}_score"] = group_score
-    final_score = pd.Series([0.0] * len(df), index=df.index)
-    for group_name, group_weight in profile["group_weights"].items():
-        final_score += df[f"{group_name}_score"] * group_weight
-    df["ranking_score"] = final_score.round(4)
-    df = df.sort_values(by=["ranking_score"], ascending=False).reset_index(drop=True)
+    weights = PVI_METRIC_WEIGHTS[position]
+    for z_col in weights.keys():
+        raw_metric = z_col.replace("z_", "")
+        if raw_metric not in df.columns:
+            df[raw_metric] = 0.0
+        df[z_col] = zscore(df[raw_metric])
+    df["pvi_raw_score"] = 0.0
+    for z_col, weight in weights.items():
+        df["pvi_raw_score"] += df[z_col] * weight
+    df["pvi_score"] = minmax_0_100(df["pvi_raw_score"])
+    df = df.sort_values(by=["pvi_score"], ascending=False).reset_index(drop=True)
     df.insert(0, "rank", range(1, len(df) + 1))
     return df
 
-def select_output_columns(df: pd.DataFrame, position: str) -> pd.DataFrame:
-    cols = [c for c in OUTPUT_COLUMNS[position] if c in df.columns]
+def select_output_columns(df: pd.DataFrame, position: str, mode: str) -> pd.DataFrame:
+    cols = OUTPUT_COLUMNS_RAW[position] if mode == "raw" else OUTPUT_COLUMNS_PVI[position]
+    cols = [c for c in cols if c in df.columns]
     return df[cols].copy()
 
 def get_rank_map(df: pd.DataFrame) -> Dict[str, int]:
@@ -416,63 +465,46 @@ def get_rank_map(df: pd.DataFrame) -> Dict[str, int]:
         return {}
     return {str(row["player_name"]): int(row["rank"]) for _, row in df[["player_name", "rank"]].dropna().iterrows()}
 
-def build_rank_comparison_df(raw_df: pd.DataFrame, weighted_df: pd.DataFrame) -> pd.DataFrame:
+def build_rank_comparison_df(raw_df: pd.DataFrame, pvi_df: pd.DataFrame) -> pd.DataFrame:
     raw_map = get_rank_map(raw_df)
-    weighted_map = get_rank_map(weighted_df)
+    pvi_map = get_rank_map(pvi_df)
     rows = []
-    for player in sorted(set(raw_map.keys()) | set(weighted_map.keys())):
+    for player in sorted(set(raw_map.keys()) | set(pvi_map.keys())):
         raw_rank = raw_map.get(player)
-        weighted_rank = weighted_map.get(player)
-        if raw_rank is None or weighted_rank is None:
+        pvi_rank = pvi_map.get(player)
+        if raw_rank is None or pvi_rank is None:
             continue
-        rows.append({"player_name": player, "raw_rank": raw_rank, "weighted_rank": weighted_rank, "delta_rank": weighted_rank - raw_rank})
+        rows.append({"player_name": player, "raw_rank": raw_rank, "pvi_rank": pvi_rank, "delta_rank": pvi_rank - raw_rank})
     return pd.DataFrame(rows)
 
 def build_all_rankings(stats_df: pd.DataFrame, minimums_config: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, pd.DataFrame]]:
     result = {}
-    for pos in POSITION_PROFILES.keys():
+    for pos in POSITION_LABELS.keys():
         raw_full = build_raw_ranking(stats_df, pos, minimums_config)
-        weighted_full = build_weighted_ranking(stats_df, pos, minimums_config)
+        pvi_full = build_pvi_ranking(stats_df, pos, minimums_config)
         result[pos] = {
             "raw_full": raw_full,
-            "weighted_full": weighted_full,
-            "raw": select_output_columns(raw_full, pos),
-            "weighted": select_output_columns(weighted_full, pos),
-            "compare": build_rank_comparison_df(raw_full, weighted_full),
+            "pvi_full": pvi_full,
+            "raw": select_output_columns(raw_full, pos, "raw"),
+            "pvi": select_output_columns(pvi_full, pos, "pvi"),
+            "compare": build_rank_comparison_df(raw_full, pvi_full),
         }
     return result
-
-def parse_manual_positions(manual_positions_text: str) -> Dict[str, str]:
-    positions_map: Dict[str, str] = {}
-    text = manual_positions_text.strip()
-    if text:
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line or "=" not in line:
-                continue
-            name, pos = line.split("=", 1)
-            name = name.strip()
-            pos = normalize_position(pos.strip())
-            if name and pos in POSITION_PROFILES:
-                positions_map[name] = pos
-    return positions_map
 
 @st.cache_data(show_spinner=False)
 def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positions_text: str):
     positions_map = parse_manual_positions(manual_positions_text)
-
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_paths: List[Path] = []
         for name, content in file_payloads:
             path = Path(tmpdir) / name
             path.write_bytes(content)
             tmp_paths.append(path)
-
         plays_df = load_many_vsm_files(tmp_paths, positions_map=positions_map)
         if plays_df.empty:
             return pd.DataFrame(), pd.DataFrame()
-
         stats_df = compute_player_stats(plays_df, positions_map=positions_map)
+        stats_df = add_team_context(stats_df)
         return plays_df, stats_df
 
 @st.cache_data(show_spinner=False)
@@ -486,10 +518,10 @@ def build_excel_bytes(stats_df: pd.DataFrame, rankings: Dict[str, Dict[str, pd.D
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for pos in ["OH", "MB", "OPP", "L", "S"]:
             raw_df = rankings.get(pos, {}).get("raw", pd.DataFrame()).copy()
-            weighted_df = rankings.get(pos, {}).get("weighted", pd.DataFrame()).copy()
+            pvi_df = rankings.get(pos, {}).get("pvi", pd.DataFrame()).copy()
             compare_df = rankings.get(pos, {}).get("compare", pd.DataFrame()).copy()
             (raw_df if not raw_df.empty else pd.DataFrame({"info": [f"Brak danych dla {pos} raw"]})).to_excel(writer, sheet_name=f"{pos}_raw", index=False)
-            (weighted_df if not weighted_df.empty else pd.DataFrame({"info": [f"Brak danych dla {pos} weighted"]})).to_excel(writer, sheet_name=f"{pos}_weighted", index=False)
+            (pvi_df if not pvi_df.empty else pd.DataFrame({"info": [f"Brak danych dla {pos} pvi"]})).to_excel(writer, sheet_name=f"{pos}_pvi", index=False)
             (compare_df if not compare_df.empty else pd.DataFrame({"info": [f"Brak danych dla {pos} compare"]})).to_excel(writer, sheet_name=f"{pos}_compare", index=False)
         if not stats_df.empty:
             stats_df.to_excel(writer, sheet_name="all_stats", index=False)
@@ -497,11 +529,11 @@ def build_excel_bytes(stats_df: pd.DataFrame, rankings: Dict[str, Dict[str, pd.D
     return output.getvalue()
 
 def render_main_table(df: pd.DataFrame):
-    st.dataframe(rename_display_columns(make_display_dataframe(df)), width='stretch', hide_index=True)
+    st.dataframe(rename_display_columns(make_display_dataframe(df)), width="stretch", hide_index=True)
 
 def main():
-    st.title("🏐 Ranking VSM")
-    st.caption("Wersja webowa z dynamicznymi minimami")
+    st.title("🏐 Ranking VSM by JSauer")
+    st.caption("PVI = prawdziwy z-score + usage rate + wagi pozycyjne")
 
     with st.sidebar:
         st.header("Dane wejściowe")
@@ -510,7 +542,6 @@ def main():
 
         st.header("Minima rankingowe")
         use_zero = st.toggle("Ustaw wszystkie minima na 0", value=False)
-
         default = {k: {kk: 0 if use_zero else vv for kk, vv in v.items()} for k, v in DEFAULT_MINIMUMS.items()}
 
         oh_rec = st.number_input("OH – min przyjęć", min_value=0, value=default["OH"]["reception_total"], step=1)
@@ -519,6 +550,33 @@ def main():
         opp_att = st.number_input("OPP – min ataków", min_value=0, value=default["OPP"]["attack_total"], step=1)
         l_rec = st.number_input("L – min przyjęć", min_value=0, value=default["L"]["reception_total"], step=1)
         s_sets = st.number_input("S – min wystaw zakończonych atakiem", min_value=0, value=default["S"]["set_to_attack_count"], step=1)
+
+    st.info("""
+### Jak liczony jest PVI
+**PVI (Player Value Index)** w tej aplikacji jest liczony w 3 krokach:
+
+1. **Prawdziwy Z-Score**  
+   Każda metryka zawodniczki jest standaryzowana względem innych zawodniczek **na tej samej pozycji**:  
+   `z = (x - średnia pozycji) / odchylenie standardowe pozycji`
+
+2. **Usage Rate**  
+   Obciążenie zawodniczki liczone jest względem jej drużyny:
+   - atak: `attack_total / team_attack_total`
+   - przyjęcie: `reception_total / team_reception_total`
+   - wystawy: `set_total / team_set_total`
+
+3. **Wagi pozycyjne**  
+   Zestandaryzowane metryki są mnożone przez wagi zależne od pozycji,
+   a końcowy wynik `PVI raw score` jest mapowany na skalę **0–100** metodą Min-Max.
+
+**Scoring Efficiency** jest liczone jako:  
+`udział w punktach drużyny / usage ataku`
+
+Dzięki temu model:
+- porównuje zawodniczki uczciwiej,
+- premiuje efektywność przy dużym obciążeniu,
+- nie opiera się tylko na surowych liczbach.
+""")
 
     if not uploaded_files:
         st.info("Najpierw wrzuć co najmniej jeden plik .vsm.")
@@ -534,7 +592,7 @@ def main():
 
     file_payloads = [(f.name, f.getvalue()) for f in uploaded_files]
 
-    with st.spinner("Liczę rankingi..."):
+    with st.spinner("Wczytuję pliki i liczę statystyki..."):
         plays_df, stats_df = process_uploaded_files(file_payloads, manual_positions_text)
         rankings = compute_rankings_cached(stats_df, minimums_config)
 
@@ -551,11 +609,11 @@ def main():
     st.download_button(
         "Pobierz Excel",
         data=build_excel_bytes(stats_df, rankings),
-        file_name="rankingi_zawodniczek.xlsx",
+        file_name="rankingi_zawodniczek_pvi.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    tab_raw, tab_weighted, tab_analysis = st.tabs(["RAW", "WEIGHTED", "ANALIZA"])
+    tab_raw, tab_pvi, tab_analysis = st.tabs(["RAW", "PVI", "ANALIZA"])
 
     with tab_raw:
         st.subheader("Ranking RAW")
@@ -566,12 +624,11 @@ def main():
         else:
             render_main_table(raw_df)
             metric_candidates = [c for c in raw_df.columns if c != "rank" and pd.api.types.is_numeric_dtype(raw_df[c])]
-            default_metric = "ranking_score" if "ranking_score" in metric_candidates else metric_candidates[0]
-            metric = st.selectbox("Metryka wykresu", metric_candidates, index=metric_candidates.index(default_metric), key="raw_metric")
+            metric = st.selectbox("Metryka wykresu", metric_candidates, key="raw_metric")
             top_n = st.slider("Liczba zawodniczek", 5, min(20, len(raw_df)), min(10, len(raw_df)), key="raw_topn")
             plot_df = raw_df.sort_values(by=metric, ascending=(metric == "rank")).head(top_n).copy()
             y_vals = plot_df[metric].fillna(0).tolist()
-            if metric.endswith("_pct"):
+            if metric.endswith("_pct") or metric.endswith("_rate"):
                 y_vals = [v * 100 for v in y_vals]
             fig, ax = plt.subplots(figsize=(10, 4))
             ax.bar(plot_df["player_name"], y_vals)
@@ -579,32 +636,31 @@ def main():
             ax.tick_params(axis="x", rotation=45)
             st.pyplot(fig)
 
-    with tab_weighted:
-        st.subheader("Ranking WEIGHTED")
-        pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="weighted_pos")
-        weighted_df = rankings[pos]["weighted"].copy()
-        if weighted_df.empty:
+    with tab_pvi:
+        st.subheader("Ranking PVI")
+        pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="pvi_pos")
+        pvi_df = rankings[pos]["pvi"].copy()
+        if pvi_df.empty:
             st.warning("Brak danych dla tej pozycji przy obecnych minimach.")
         else:
-            render_main_table(weighted_df)
-            top_n = st.slider("Liczba zawodniczek", 5, min(20, len(weighted_df)), min(10, len(weighted_df)), key="weighted_topn")
-            plot_df = weighted_df.head(top_n).copy()
+            render_main_table(pvi_df)
+            top_n = st.slider("Liczba zawodniczek", 5, min(20, len(pvi_df)), min(10, len(pvi_df)), key="pvi_topn")
+            plot_df = pvi_df.head(top_n).copy()
             fig, ax = plt.subplots(figsize=(10, 4))
-            ax.bar(plot_df["player_name"], plot_df["ranking_score"].fillna(0).tolist())
-            ax.set_title(f"TOP {len(plot_df)} – Weighted score")
+            ax.bar(plot_df["player_name"], plot_df["pvi_score"].fillna(0).tolist())
+            ax.set_title(f"TOP {len(plot_df)} – PVI score")
             ax.tick_params(axis="x", rotation=45)
             st.pyplot(fig)
 
     with tab_analysis:
-        st.subheader("RAW vs WEIGHTED")
+        st.subheader("RAW vs PVI")
         pos = st.selectbox("Pozycja", ["OH", "MB", "OPP", "L", "S"], key="analysis_pos")
         compare_df = rankings[pos]["compare"].copy()
         if compare_df.empty:
             st.warning("Brak danych dla tej pozycji przy obecnych minimach.")
         else:
-            st.caption("Tabela pokazuje ranking RAW obok WEIGHTED oraz zmianę miejsca względem RAW.")
-            table_df = compare_df[["player_name", "raw_rank", "weighted_rank", "delta_rank"]].copy()
-            st.dataframe(rename_display_columns(make_display_dataframe(table_df)), width='stretch', hide_index=True)
+            st.caption("Tabela pokazuje ranking RAW obok PVI oraz zmianę miejsca względem RAW.")
+            render_main_table(compare_df[["player_name", "raw_rank", "pvi_rank", "delta_rank"]].copy())
 
             sort_mode = st.radio("Sortowanie zmian", ["Największe awanse", "Największe spadki", "Alfabetycznie"], horizontal=True)
             chart_df = compare_df.copy()
@@ -619,7 +675,7 @@ def main():
             ax.bar(chart_df["player_name"], chart_df["delta_rank"])
             ax.axhline(0, linewidth=1)
             ax.set_title("Zmiana pozycji względem RAW")
-            ax.set_ylabel("WEIGHTED - RAW")
+            ax.set_ylabel("PVI - RAW")
             ax.tick_params(axis="x", rotation=45)
             st.pyplot(fig)
 
