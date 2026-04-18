@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Ranking VSM by J.Sauer", page_icon="🏐", layout="wide")
+st.set_page_config(page_title="Ranking VSM", page_icon="🏐", layout="wide")
 
 POSITION_ALIASES = {
     "przyjmująca": "OH", "przyjmujaca": "OH", "przyjmujący": "OH", "przyjmujacy": "OH",
@@ -442,8 +442,7 @@ def build_all_rankings(stats_df: pd.DataFrame, minimums_config: Dict[str, Dict[s
         }
     return result
 
-@st.cache_data(show_spinner=False)
-def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positions_text: str, minimums_config: Dict[str, Dict[str, int]]):
+def parse_manual_positions(manual_positions_text: str) -> Dict[str, str]:
     positions_map: Dict[str, str] = {}
     text = manual_positions_text.strip()
     if text:
@@ -456,6 +455,11 @@ def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positi
             pos = normalize_position(pos.strip())
             if name and pos in POSITION_PROFILES:
                 positions_map[name] = pos
+    return positions_map
+
+@st.cache_data(show_spinner=False)
+def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positions_text: str):
+    positions_map = parse_manual_positions(manual_positions_text)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_paths: List[Path] = []
@@ -466,11 +470,16 @@ def process_uploaded_files(file_payloads: List[Tuple[str, bytes]], manual_positi
 
         plays_df = load_many_vsm_files(tmp_paths, positions_map=positions_map)
         if plays_df.empty:
-            return pd.DataFrame(), pd.DataFrame(), {}
+            return pd.DataFrame(), pd.DataFrame()
 
         stats_df = compute_player_stats(plays_df, positions_map=positions_map)
-        rankings = build_all_rankings(stats_df, minimums_config)
-        return plays_df, stats_df, rankings
+        return plays_df, stats_df
+
+@st.cache_data(show_spinner=False)
+def compute_rankings_cached(stats_df: pd.DataFrame, minimums_config: Dict[str, Dict[str, int]]):
+    if stats_df.empty:
+        return {}
+    return build_all_rankings(stats_df, minimums_config)
 
 def build_excel_bytes(stats_df: pd.DataFrame, rankings: Dict[str, Dict[str, pd.DataFrame]]) -> bytes:
     output = io.BytesIO()
@@ -488,7 +497,7 @@ def build_excel_bytes(stats_df: pd.DataFrame, rankings: Dict[str, Dict[str, pd.D
     return output.getvalue()
 
 def render_main_table(df: pd.DataFrame):
-    st.dataframe(rename_display_columns(make_display_dataframe(df)), use_container_width=True, hide_index=True)
+    st.dataframe(rename_display_columns(make_display_dataframe(df)), width='stretch', hide_index=True)
 
 def main():
     st.title("🏐 Ranking VSM")
@@ -526,7 +535,8 @@ def main():
     file_payloads = [(f.name, f.getvalue()) for f in uploaded_files]
 
     with st.spinner("Liczę rankingi..."):
-        plays_df, stats_df, rankings = process_uploaded_files(file_payloads, manual_positions_text, minimums_config)
+        plays_df, stats_df = process_uploaded_files(file_payloads, manual_positions_text)
+        rankings = compute_rankings_cached(stats_df, minimums_config)
 
     if plays_df.empty or stats_df.empty or not rankings:
         st.error("Nie udało się wczytać żadnych zagrań z plików.")
@@ -594,7 +604,7 @@ def main():
         else:
             st.caption("Tabela pokazuje ranking RAW obok WEIGHTED oraz zmianę miejsca względem RAW.")
             table_df = compare_df[["player_name", "raw_rank", "weighted_rank", "delta_rank"]].copy()
-            st.dataframe(rename_display_columns(make_display_dataframe(table_df)), use_container_width=True, hide_index=True)
+            st.dataframe(rename_display_columns(make_display_dataframe(table_df)), width='stretch', hide_index=True)
 
             sort_mode = st.radio("Sortowanie zmian", ["Największe awanse", "Największe spadki", "Alfabetycznie"], horizontal=True)
             chart_df = compare_df.copy()
